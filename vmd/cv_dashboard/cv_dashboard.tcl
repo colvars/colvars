@@ -37,6 +37,7 @@ namespace eval ::cv_dashboard {
   variable filetype "atomsFile"
   variable colvar_configs  ;# dictionary mapping names to cfg strings
   set colvar_configs [dict create]
+  variable non_colvar_config "" ;# config string for everything but colvars
 
   # Handle to keep track of interactive plot
   variable plothandle
@@ -161,7 +162,8 @@ proc ::cv_dashboard::apply_config { cfg } {
   set cvs_after [run_cv list]
 
   # Extract config for individual colvars
-  set cv_configs [extract_colvar_configs $cfg]
+  lassign [extract_colvar_configs $cfg] cv_configs non_colvar
+  append ::cv_dashboard::non_colvar_config $non_colvar
 
   # Update atom visualizations for modified colvars
   foreach cv [dict keys $cv_configs] {
@@ -188,6 +190,7 @@ proc ::cv_dashboard::apply_config { cfg } {
   }
   # Overwrite old map
   set ::cv_dashboard::colvar_configs $new_map
+
   refresh_table
   refresh_units
   return $res
@@ -196,30 +199,33 @@ proc ::cv_dashboard::apply_config { cfg } {
 
 # Parse config string to extract colvar blocks
 # Return dictionary of colvar names -> config strings
-# Needs to fail gracefully upon unmatched braces
+# and anything that is not a colvar as a separate string
 proc ::cv_dashboard::extract_colvar_configs { cfg_in } {
   set lines [split $cfg_in "\n"]
   set in_cv 0
   set brace_depth 0
   set map [dict create]
-  set name ""
+  set non_colvar ""
   foreach line $lines {
     if { $in_cv == 0 } {
       # In main body, just look for colvar definition
       if { [regexp -nocase {^\s*colvar\s+\{\s*(.*)} $line match firstline] } {
         set in_cv 1
+        set name ""
         set cv_line 1
         set brace_depth 1
         set cv_cfg "\n"
-        # The first line may follow the opening brace immediately
-        if { [string length $firstline] } {
-          set line "    ${firstline}"
+        # A first line may follow the opening brace immediately
+        if [regexp {[^\s]} $firstline match] {
+          set line "${::cv_dashboard::indent}${firstline}"
+          # Will be processed below
         } else {
           # Nothing more to parse from this line
           continue
         }
       } else {
-        # Don't parse non-colvar data
+        # Don't parse non-colvar data, but remember it
+        append non_colvar $line "\n"
         continue
       }
     }
@@ -229,11 +235,13 @@ proc ::cv_dashboard::extract_colvar_configs { cfg_in } {
       regexp -nocase {^\s*name\s+([^\s{}#]+)} $line match name
     }
 
-    # Finally, the tedious fishing for braces
+    # Processing a line within a colvar block: track braces to find the end
+    # braces only matter if they aren't in a comment
     regexp {^[^#]*} $line nocomments
-    set chars [split $nocomments ""]
+    set chars_nocomments [split $nocomments ""]
     set cur_line ""
-    foreach c $chars {
+
+    foreach c $chars_nocomments {
       switch $c {
         "{" { incr brace_depth }
         "}" {
@@ -245,13 +253,15 @@ proc ::cv_dashboard::extract_colvar_configs { cfg_in } {
             return $map
           }
           if { $brace_depth == 0 } {
-            # End of colvar block
-            if { [string length $cur_line] > 0 } {
+            # This closing brace ends the colvar block.
+            # Does the line so far have contents? Store it.
+            if [regexp {[^\s]} $cur_line match] {
               append cv_cfg $cur_line "\n"
             }
-            dict set map $name $cv_cfg
+            dict set map $name $cv_cfg ;# Store the colvar config
             set in_cv 0
-            set name ""
+            set cur_line "" ;# Store possible non-colvar contents after closing brace
+            set c "" ;# do not store closing brace
           }
         }
       }
@@ -260,13 +270,18 @@ proc ::cv_dashboard::extract_colvar_configs { cfg_in } {
     }
 
     if { $in_cv } {
+      # Line ended within a colvar block
       if { $cv_line >= 1 } {
         append cv_cfg $line "\n"
       }
       incr cv_line
+    } elseif [regexp {^\s*([^\s]+)} $cur_line match cur_line_nospace] {
+      # Line ended outside a colvars block and end of line contains non-whitespace
+      append non_colvar $cur_line_nospace "\n"
     }
   }
-  return $map
+
+  return [list $map $non_colvar]
 }
 
 
@@ -353,7 +368,8 @@ proc ::cv_dashboard::update_mol_list { name molid op } {
   # Did we just lose the molecule Colvars was connected to?
   if { ($molid == $::cv_dashboard::mol) && ($::vmd_initialize_structure($molid) == 0) } {
     tk_messageBox -icon error -title "Colvars Dashboard Error"\
-      -message "The molecule associated to the Colvars Module was deleted.\nSave the configuration if necessary, load a molecule and use the Reset button.\n"
+      -message "The molecule associated to the Colvars Module was deleted.
+Save the configuration if necessary, load a molecule and use the Reset button."
     # remove tracking of deleted molecule
     trace remove variable ::vmd_frame($molid) write ::cv_dashboard::update_frame
     set ::cv_dashboard::mol -1
@@ -378,6 +394,7 @@ proc ::cv_dashboard::change_mol {} {
 
     set ::cv_dashboard::mol $newmolid
     # Remember config
+    # FIXME: units could be duplicated now that we keep non-cv config
     if {$::cv_dashboard::units == ""} {
       set cfg ""
     } else {
@@ -386,8 +403,11 @@ proc ::cv_dashboard::change_mol {} {
     foreach cv [run_cv list] {
         append cfg "colvar {[get_config $cv]}\n\n"
     }
+    # Attempt to preserve non-colvar config
+    set non_cv_cfg $::cv_dashboard::non_colvar_config
     reset
     apply_config $cfg
+    apply_config $non_cv_cfg
     change_track_frame ;# activate tracking of new molecule if requested
   }
 }

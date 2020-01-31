@@ -84,18 +84,21 @@ int tcl_colvars(ClientData clientdata, Tcl_Interp *interp,
       return TCL_ERROR;
     }
 
-  } else {
+  }
 
-    VMDApp *vmd = (VMDApp *) clientdata;
-    if (vmd == NULL) {
-      Tcl_SetResult(interp, (char *) "Error: cannot find VMD main object.",
-                    TCL_STATIC);
-      return TCL_ERROR;
-    }
+  VMDApp *vmd = (VMDApp *) clientdata;
+  if (vmd == NULL) {
+    Tcl_SetResult(interp, (char *) "Error: cannot find VMD main object.",
+                  TCL_STATIC);
+    return TCL_ERROR;
+  }
 
-    if (objc >= 3) {
-      // require a molid to create the module
-      if (!strcmp(Tcl_GetString(objv[1]), "molid")) {
+  if (objc >= 2) {
+
+    if (!strcmp(Tcl_GetString(objv[1]), "molid")) {
+
+      // set up the module attached to the given molid
+      if (objc == 3) {
         int molid = -1;
         if (!strcmp(Tcl_GetString(objv[2]), "top")) {
           molid = vmd->molecule_top();
@@ -111,6 +114,18 @@ int tcl_colvars(ClientData clientdata, Tcl_Interp *interp,
           return TCL_ERROR;
         }
       }
+
+      // return invalid molid
+      if (objc == 2) {
+        Tcl_SetResult(interp, (char *) "-1", TCL_STATIC);
+      }
+    }
+
+    if (!strcmp(Tcl_GetString(objv[1]), "delete") ||
+        !strcmp(Tcl_GetString(objv[1]), "reset")) {
+      // nothing to delete or reset
+      Tcl_SetResult(interp, NULL, TCL_STATIC);
+      return TCL_OK;
     }
   }
 
