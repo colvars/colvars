@@ -98,6 +98,10 @@ class colvarproxy_lammps : public colvarproxy {
   inline cvm::real temperature() { return t_target; };
   inline cvm::real dt() { return my_timestep; }; // return _lmp->update->dt * _lmp->force->femtosecond; };
 
+  virtual char const *script_obj_to_str(unsigned char *obj);
+
+  virtual std::vector<std::string> script_obj_to_str_vector(unsigned char *obj);
+
   void add_energy(cvm::real energy) { bias_energy += energy; };
   void request_total_force(bool yesno) { total_force_requested = yesno; };
 
