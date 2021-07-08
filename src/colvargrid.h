@@ -542,10 +542,19 @@ public:
   {
     for (size_t i = 0; i < data.size(); i++) out_data[i] = data[i];
   }
+  void raw_data_out(std::vector<T>& out_data) const
+  {
+    out_data = data;
+  }
   /// \brief Input the data as they are represented in memory.
   void raw_data_in(const T* in_data)
   {
     for (size_t i = 0; i < data.size(); i++) data[i] = in_data[i];
+    has_data = true;
+  }
+  void raw_data_in(const std::vector<T>& in_data)
+  {
+    data = in_data;
     has_data = true;
   }
   /// \brief Size of the data as they are represented in memory.
@@ -1438,6 +1447,49 @@ public:
       grad[2] = 0.25 * ((p[1] + p[3] + p[5] + p[7]) - (p[0] + p[2] + p[4] + p[6])) / widths[2];
     } else {
       cvm::error("Finite differences available in dimension 2 and 3 only.");
+    }
+  }
+
+  /// \brief Return the gradient of discrete count from finite differences
+  /// on the *same* grid for dimension n
+  inline cvm::real gradient_finite_diff(const std::vector<int> &ix0,
+                                            int n = 0)
+  {
+    cvm::real A0, A1, A2;
+    std::vector<int> ix = ix0;
+
+    // FIXME this can be rewritten more concisely with wrap_edge()
+    if (periodic[n]) {
+      ix[n]--; wrap(ix);
+      A0 = value(ix);
+      ix = ix0;
+      ix[n]++; wrap(ix);
+      A1 = value(ix);
+      if (A0 * A1 == 0) {
+        return 0.; // can't handle empty bins
+      } else {
+        return (A1 - A0) / (widths[n] * 2.);
+      }
+    } else if (ix[n] > 0 && ix[n] < nx[n]-1) { // not an edge
+      ix[n]--;
+      A0 = value(ix);
+      ix = ix0;
+      ix[n]++;
+      A1 = value(ix);
+      if (A0 * A1 == 0) {
+        return 0.; // can't handle empty bins
+      } else {
+        return (A1 - A0) / (widths[n] * 2.);
+      }
+    } else {
+      // edge: use 2nd order derivative
+      cvm::real increment = (ix[n] == 0 ? 1.0 : -1.0);
+      // move right from left edge, or the other way around
+      A0 = value(ix);
+      ix[n] += increment; A1 = value(ix);
+      ix[n] += increment; A2 = value(ix);
+      return (-1.5 * A0 + 2. * A1
+          - 0.5 * A2) * increment / widths[n];
     }
   }
 
